@@ -1,164 +1,96 @@
-from rest_framework import serializers
-from .models import Product
 import re
 import os
+import logging
+from rest_framework import serializers
+from .models import Product, Review, Category, MediaImage
+from django.core.exceptions import ValidationError
 
+logger = logging.getLogger(__name__)
+
+class MediaImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MediaImage
+        fields = ['id', 'image', 'created_at']
+        read_only_fields = ['created_at']
 
 class ProductSerializer(serializers.ModelSerializer):
-    condition_display = serializers.CharField(
-        source='get_condition_display', read_only=True)
-    color_display = serializers.CharField(
-        source='get_color_display', read_only=True)
+    category_name = serializers.CharField(source='category.name', read_only=True)
+    rating = serializers.SerializerMethodField()
+    reviews_count = serializers.SerializerMethodField()
+    additional_images = MediaImageSerializer(many=True, read_only=True)
 
     class Meta:
         model = Product
         fields = [
-            'id', 'title', 'description', 'price', 'condition', 'condition_display',
-            'phone_model', 'color', 'color_display', 'storage', 'screen_size',
-            'screen_condition', 'body_condition', 'battery_health', 'includes',
-            'seller_phone', 'seller_address', 'created_at', 'updated_at',
-            'main_image', 'image_2', 'image_3', 'image_4', 'image_5', 'seller_id'
+            'id', 'title', 'slug', 'description', 'price', 'category', 'category_name',
+            'main_image', 'additional_images', 'rating', 'reviews_count', 'created_at', 'updated_at',
+            'phone_model', 'color', 'storage', 'condition', 'body_condition', 'screen_condition',
+            'battery_health', 'turbo', 'комплектация'
         ]
-        read_only_fields = ['created_at', 'updated_at']
-        extra_kwargs = {
-            'title': {'required': True},
-            'description': {'required': True},
-            'price': {'required': True},
-            'condition': {'required': True},
-            'phone_model': {'required': False},
-            'color': {'required': False},
-            'storage': {'required': False},
-            'screen_size': {'required': False},
-            'screen_condition': {'required': False},
-            'body_condition': {'required': False},
-            'battery_health': {'required': False},
-            'includes': {'required': False},
-            'seller_phone': {'required': False},
-            'seller_address': {'required': False},
-            'main_image': {'required': False, 'allow_null': True},
-            'image_2': {'required': False, 'allow_null': True},
-            'image_3': {'required': False, 'allow_null': True},
-            'image_4': {'required': False, 'allow_null': True},
-            'image_5': {'required': False, 'allow_null': True},
-        }
+        read_only_fields = ['slug', 'created_at', 'updated_at']
 
-    def validate_title(self, value):
-        """Validate title field"""
-        if len(value) < 3:
-            raise serializers.ValidationError(
-                "Название должно содержать не менее 3 символов")
+    def get_rating(self, obj):
+        return obj.calculate_rating()
 
-        # Check for potential XSS
-        if re.search(r'<script|javascript:|vbscript:|expression\(|onload=|onerror=', value, re.IGNORECASE):
-            raise serializers.ValidationError(
-                "Название содержит потенциально опасный код")
+    def get_reviews_count(self, obj):
+        return obj.reviews.count()
 
+    def validate_main_image(self, value):
+        if value:
+            # Check file size (5MB limit)
+            if value.size > 5242880:  # 5MB
+                raise serializers.ValidationError("Image size must be less than 5MB")
+            
+            # Check file extension
+            ext = os.path.splitext(value.name)[1].lower()
+            if ext not in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
+                raise serializers.ValidationError("Only jpg, jpeg, png, gif and webp files are allowed")
         return value
 
     def validate_description(self, value):
-        """Validate description field"""
         if len(value) < 10:
-            raise serializers.ValidationError(
-                "Описание должно содержать не менее 10 символов")
-
-        # Check for potential XSS
-        if re.search(r'<script|javascript:|vbscript:|expression\(|onload=|onerror=', value, re.IGNORECASE):
-            raise serializers.ValidationError(
-                "Описание содержит потенциально опасный код")
-
-        return value
-
-    def validate_main_image(self, value):
-        """Validate main image field"""
-        if value:
-            # If it's a string (URL), skip validation
-            if isinstance(value, str):
-                return value
-
-            # Check file size (5MB limit)
-            if value.size > 5242880:  # 5MB
-                raise serializers.ValidationError(
-                    "Размер изображения не должен превышать 5MB")
-
-            # Check file extension
-            ext = os.path.splitext(value.name)[1].lower()
-            if ext not in ['.jpg', '.jpeg', '.png', '.gif']:
-                raise serializers.ValidationError(
-                    "Файл должен быть изображением (jpg, jpeg, png, gif)")
-
-        return value
-
-    def validate_price(self, value):
-        """Validate price field"""
-        if value <= 0:
-            raise serializers.ValidationError(
-                "Цена должна быть положительным числом")
-
-        # Check for reasonable price range
-        if value > 1000000:  # 1 million
-            raise serializers.ValidationError(
-                "Цена слишком высокая")
-
+            raise serializers.ValidationError("Description must be at least 10 characters long")
         return value
 
     def validate_battery_health(self, value):
-        """Validate battery health field"""
-        if value is not None and (value < 0 or value > 100):
-            raise serializers.ValidationError(
-                "Здоровье батареи должно быть от 0 до 100")
+        if not 0 <= value <= 100:
+            raise serializers.ValidationError("Battery health must be between 0 and 100")
         return value
 
-    def validate_seller_phone(self, value):
-        """Validate seller phone field"""
-        if value and not re.match(r'^[0-9+\s\-()]+$', value):
-            raise serializers.ValidationError(
-                "Телефон может содержать только цифры, пробелы, дефисы и скобки")
+    def validate_комплектация(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError("комплектация must be a list")
         return value
 
-    def validate_seller_address(self, value):
-        """Validate seller address field"""
-        if value and re.search(r'<script|javascript:|vbscript:|expression\(|onload=|onerror=', value, re.IGNORECASE):
-            raise serializers.ValidationError(
-                "Адрес содержит потенциально опасный код")
-        return value
-
-    def validate(self, data):
-        """Validate the entire data object"""
-        # Check for potential SQL injection in text fields
-        text_fields = ['title', 'description', 'phone_model', 'storage',
-                       'screen_condition', 'body_condition', 'includes', 'seller_address']
-
-        for field in text_fields:
-            if field in data and data[field]:
-                if re.search(r'(?i)(union|select|insert|update|delete|drop|alter|exec|declare|xp_cmdshell)',
-                             str(data[field])):
-                    raise serializers.ValidationError(
-                        {field: "Поле содержит потенциально опасный код"})
-
-        return data
+    def create(self, validated_data):
+        instance = super().create(validated_data)
+        return instance
 
     def update(self, instance, validated_data):
-        """Handle image updates"""
-        # Handle main image
-        main_image = validated_data.pop('main_image', None)
-        if main_image is not None:
-            if isinstance(main_image, str):
-                # If it's a URL, keep the existing image
-                validated_data['main_image'] = instance.main_image
-            else:
-                # If it's a file, update the image
-                validated_data['main_image'] = main_image
+        instance = super().update(instance, validated_data)
+        return instance
 
-        # Handle additional images
-        for i in range(2, 6):
-            image_key = f'image_{i}'
-            image = validated_data.pop(image_key, None)
-            if image is not None:
-                if isinstance(image, str):
-                    # If it's a URL, keep the existing image
-                    validated_data[image_key] = getattr(instance, image_key)
-                else:
-                    # If it's a file, update the image
-                    validated_data[image_key] = image
+    def validate_title(self, value):
+        if len(value) < 3:
+            raise serializers.ValidationError("Title must be at least 3 characters")
+        return value
 
-        return super().update(instance, validated_data)
+    def validate_image(self, value):
+        validate_image(value)
+        return value
+
+class CategorySerializer(serializers.ModelSerializer):
+    product_count = serializers.IntegerField(read_only=True)
+    
+    class Meta:
+        model = Category
+        fields = ['id', 'name', 'description', 'product_count']
+
+class ReviewSerializer(serializers.ModelSerializer):
+    user = serializers.StringRelatedField(read_only=True)
+    product = serializers.StringRelatedField(read_only=True)
+    
+    class Meta:
+        model = Review
+        fields = ['id', 'user', 'product', 'rating', 'comment', 'created_at']
+        read_only_fields = ['user', 'product', 'created_at']

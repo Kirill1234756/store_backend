@@ -9,6 +9,13 @@ from PIL import Image
 import os
 from io import BytesIO
 from django.core.files.base import ContentFile
+from django.utils.functional import cached_property
+from django.utils.text import slugify
+from django.core.exceptions import ValidationError
+from .image_utils import save_image, delete_image
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
 
 
 class CompressedImageField(models.ImageField):
@@ -50,6 +57,20 @@ class Product(models.Model):
         ('C', 'Удовлетворительное')
     ]
 
+    BODY_CONDITION_CHOICES = [
+        ('A', 'Идеальное'),
+        ('B', 'Хорошее'),
+        ('C', 'Удовлетворительное'),
+        ('D', 'Плохое')
+    ]
+
+    SCREEN_CONDITION_CHOICES = [
+        ('A', 'Идеальное'),
+        ('B', 'Хорошее'),
+        ('C', 'Удовлетворительное'),
+        ('D', 'Плохое')
+    ]
+
     COLOR_CHOICES = [
         ('black', 'Чёрный'),
         ('white', 'Белый'),
@@ -61,19 +82,28 @@ class Product(models.Model):
         ('other', 'Другой')
     ]
 
+    STORAGE_CHOICES = [
+        ('64GB', '64GB'),
+        ('128GB', '128GB'),
+        ('256GB', '256GB'),
+        ('512GB', '512GB'),
+        ('1TB', '1TB')
+    ]
+
     # Основная информация
     title = models.CharField(
         max_length=200,
         verbose_name='Название',
         validators=[
             RegexValidator(
-                regex=r'^[a-zA-Zа-яА-Я0-9\s\-_.,!?()]+$',
+                regex=r'^[a-zA-Z0-9\s\-_.,!?()]+$',
                 message='Название может содержать только буквы, цифры и специальные символы',
                 code='invalid_title'
             )
         ],
         db_index=True
     )
+    slug = models.SlugField(unique=True, blank=True)
     description = models.TextField(
         verbose_name='Описание',
         validators=[
@@ -93,16 +123,37 @@ class Product(models.Model):
         db_index=True
     )
     condition = models.CharField(
-        max_length=50,
+        max_length=20,
         choices=CONDITION_CHOICES,
-        verbose_name='Состояние'
+        verbose_name='Состояние',
+        db_index=True
+    )
+    is_active = models.BooleanField(default=True, db_index=True)
+
+    # Связи с другими моделями
+    category = models.ForeignKey(
+        'Category',
+        on_delete=models.CASCADE,
+        verbose_name='Категория',
+        related_name='products',
+        null=True,
+        blank=True,
+        db_index=True
+    )
+    seller = models.ForeignKey(
+        'auth.User',
+        on_delete=models.CASCADE,
+        verbose_name='Продавец',
+        related_name='products',
+        null=True,
+        blank=True,
+        db_index=True
     )
 
     # Характеристики устройства
     phone_model = models.CharField(
         max_length=100,
         verbose_name='Модель телефона',
-        default='Не указана',
         validators=[
             RegexValidator(
                 regex=r'^[a-zA-Zа-яА-Я0-9\s\-_.,!?()]+$',
@@ -114,105 +165,46 @@ class Product(models.Model):
     color = models.CharField(
         max_length=50,
         choices=COLOR_CHOICES,
-        default='black',
         verbose_name='Цвет'
     )
     storage = models.CharField(
         max_length=50,
-        verbose_name='Память',
-        default='Не указана',
-        validators=[
-            RegexValidator(
-                regex=r'^[a-zA-Zа-яА-Я0-9\s\-_.,!?()]+$',
-                message='Память может содержать только буквы, цифры и специальные символы',
-                code='invalid_storage'
-            )
-        ]
+        choices=STORAGE_CHOICES,
+        verbose_name='Память'
     )
     screen_size = models.DecimalField(
         max_digits=4,
         decimal_places=1,
-        verbose_name='Диагональ экрана (дюймы)',
-        default=Decimal('6.1'),
-        validators=[
-            MinValueValidator(
-                Decimal('1.0'), message='Диагональ экрана должна быть больше 1 дюйма'),
-            MaxValueValidator(
-                Decimal('20.0'), message='Диагональ экрана должна быть меньше 20 дюймов')
-        ]
-    )
-    screen_condition = models.CharField(
-        max_length=50,
-        verbose_name='Состояние экрана',
-        blank=True,
-        default='Хорошее',
-        validators=[
-            RegexValidator(
-                regex=r'^[a-zA-Zа-яА-Я0-9\s\-_.,!?()]+$',
-                message='Состояние экрана может содержать только буквы, цифры и специальные символы',
-                code='invalid_screen_condition'
-            )
-        ]
+        verbose_name='Размер экрана (дюймы)',
+        validators=[MinValueValidator(Decimal('0.1')), MaxValueValidator(Decimal('10.0'))],
+        null=True,
+        blank=True
     )
     body_condition = models.CharField(
-        max_length=50,
+        max_length=20,
+        choices=BODY_CONDITION_CHOICES,
         verbose_name='Состояние корпуса',
-        blank=True,
-        default='Хорошее',
-        validators=[
-            RegexValidator(
-                regex=r'^[a-zA-Zа-яА-Я0-9\s\-_.,!?()]+$',
-                message='Состояние корпуса может содержать только буквы, цифры и специальные символы',
-                code='invalid_body_condition'
-            )
-        ]
+        default='B'
+    )
+    screen_condition = models.CharField(
+        max_length=20,
+        choices=SCREEN_CONDITION_CHOICES,
+        verbose_name='Состояние экрана',
+        default='B'
     )
     battery_health = models.IntegerField(
         validators=[MinValueValidator(0), MaxValueValidator(100)],
         verbose_name='Здоровье аккумулятора (%)',
         default=80
     )
-    includes = models.TextField(
+    turbo = models.BooleanField(
+        default=False,
+        verbose_name='Наличие турбо'
+    )
+    комплектация = models.JSONField(
         verbose_name='Комплектация',
-        blank=True,
-        default='Телефон, зарядное устройство',
-        validators=[
-            RegexValidator(
-                regex=r'^[a-zA-Zа-яА-Я0-9\s\-_.,!?()]+$',
-                message='Комплектация может содержать только буквы, цифры и специальные символы',
-                code='invalid_includes'
-            )
-        ]
-    )
-
-    # Контактная информация
-    seller_id = models.IntegerField(
-        verbose_name='ID продавца',
-        default=1
-    )
-    seller_phone = models.CharField(
-        max_length=20,
-        verbose_name='Телефон продавца',
-        default='',
-        validators=[
-            RegexValidator(
-                regex=r'^[0-9+\s\-()]+$',
-                message='Телефон может содержать только цифры, пробелы, дефисы и скобки',
-                code='invalid_phone'
-            )
-        ]
-    )
-    seller_address = models.TextField(
-        verbose_name='Адрес продавца',
-        blank=True,
-        default='Не указан',
-        validators=[
-            RegexValidator(
-                regex=r'^[a-zA-Zа-яА-Я0-9\s\-_.,!?()]+$',
-                message='Адрес может содержать только буквы, цифры и специальные символы',
-                code='invalid_address'
-            )
-        ]
+        default=list,
+        help_text='Список комплектующих'
     )
 
     # Даты
@@ -220,113 +212,187 @@ class Product(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     # Изображения
-    main_image = CompressedImageField(
-        upload_to='products/',
-        verbose_name='Главное изображение',
-        blank=True,
-        null=True
-    )
-    image_2 = CompressedImageField(
-        upload_to='products/',
-        blank=True,
-        null=True,
-        verbose_name='Доп. изображение 1'
-    )
-    image_3 = CompressedImageField(
-        upload_to='products/',
-        blank=True,
-        null=True,
-        verbose_name='Доп. изображение 2'
-    )
-    image_4 = CompressedImageField(
-        upload_to='products/',
-        blank=True,
-        null=True,
-        verbose_name='Доп. изображение 3'
-    )
-    image_5 = CompressedImageField(
-        upload_to='products/',
-        blank=True,
-        null=True,
-        verbose_name='Доп. изображение 4'
-    )
+    main_image = models.ImageField(upload_to='products/', null=True, blank=True)
+    additional_images = models.ManyToManyField('MediaImage', blank=True, related_name='products')
 
     # Рейтинг
     rating = models.DecimalField(
         max_digits=3,
         decimal_places=2,
-        verbose_name='Рейтинг',
-        default=Decimal('0.0'),
-        validators=[
-            MinValueValidator(
-                Decimal('0.0'), message='Рейтинг не может быть отрицательным'),
-            MaxValueValidator(
-                Decimal('5.0'), message='Рейтинг не может быть больше 5')
-        ]
+        default=0,
+        validators=[MinValueValidator(0), MaxValueValidator(5)],
+        db_index=True
     )
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._original_title = self.title if self.id else None
+
     def __str__(self):
-        return f"{self.title}\t{self.price} ₽\t{self.storage}"
+        return self.title
 
     def clean(self):
-        """Custom validation for the model"""
-        # Check for potential XSS in text fields
-        text_fields = ['title', 'description', 'phone_model', 'storage', 'screen_condition',
-                       'body_condition', 'includes', 'seller_address']
-
-        for field in text_fields:
-            value = getattr(self, field)
-            if value and re.search(r'<script|javascript:|vbscript:|expression\(|onload=|onerror=', value, re.IGNORECASE):
-                from django.core.exceptions import ValidationError
-                raise ValidationError(
-                    {field: 'Поле содержит потенциально опасный код'})
-
-        # Don't set default image if not provided
-        # Let the field handle null values
+        if self.price is not None and self.price < 0:
+            raise ValidationError({'price': 'Цена не может быть отрицательной'})
+        if self.battery_health is not None and (self.battery_health < 0 or self.battery_health > 100):
+            raise ValidationError({'battery_health': 'Здоровье аккумулятора должно быть от 0 до 100%'})
 
     def save(self, *args, **kwargs):
-        """Override save to run clean method"""
-        self.clean()
+        # Handle main image
+        if self.main_image and hasattr(self.main_image, 'file'):
+            # Delete old image if exists
+            if self.pk:
+                old_instance = Product.objects.get(pk=self.pk)
+                if old_instance.main_image and old_instance.main_image != self.main_image:
+                    delete_image(old_instance.main_image.path)
+            
+            # Save new image
+            self.main_image.name = save_image(self.main_image)
+        
+        # Handle additional images
+        if hasattr(self, '_images_to_save'):
+            # Delete old images
+            if self.pk:
+                old_instance = Product.objects.get(pk=self.pk)
+                for old_image in old_instance.additional_images.all():
+                    delete_image(old_image.image.path)
+            
+            # Save new images
+            self.additional_images.clear()
+            for image in self._images_to_save:
+                if hasattr(image, 'file'):
+                    saved_path = save_image(image)
+                    self.additional_images.add(MediaImage.objects.create(image=saved_path))
+            delattr(self, '_images_to_save')
+        
+        if not self.slug or (self._original_title and self.title != self._original_title):
+            self.slug = slugify(self.title)
+            original_slug = self.slug
+            counter = 1
+            while Product.objects.filter(slug=self.slug).exclude(id=self.id).exists():
+                self.slug = f"{original_slug}-{counter}"
+                counter += 1
+        
         super().save(*args, **kwargs)
-        # Clear cache on save
-        cache.delete_pattern('product:*')
+        self._original_title = self.title
+        cache.delete_pattern('product_*')
 
     def delete(self, *args, **kwargs):
+        # Delete main image
+        if self.main_image:
+            delete_image(self.main_image.path)
+        
+        # Delete additional images
+        for image in self.additional_images.all():
+            delete_image(image.image.path)
+        
         super().delete(*args, **kwargs)
-        # Clear cache on delete
-        cache.delete_pattern('product:*')
+        cache.delete_pattern('product_*')
 
     class Meta:
         verbose_name = 'Товар'
         verbose_name_plural = 'Товары'
         indexes = [
-            Index(fields=['-created_at'], name='recent_idx'),
-            Index(fields=['price']),
-            Index(fields=['created_at']),
-            Index(fields=['condition']),
-            Index(fields=['storage']),
-            Index(fields=['phone_model']),
-            Index(fields=['rating']),
+            Index(fields=['-created_at'], name='product_recent_idx'),
+            Index(fields=['price'], name='product_price_idx'),
+            Index(fields=['created_at'], name='product_created_at_idx'),
+            Index(fields=['condition'], name='product_condition_idx'),
+            Index(fields=['storage'], name='product_storage_idx'),
+            Index(fields=['phone_model'], name='product_phone_model_idx'),
+            Index(fields=['rating'], name='product_rating_idx'),
+            Index(fields=['title', 'price'], name='product_title_price_idx'),
+            Index(fields=['created_at', 'price'], name='product_created_price_idx'),
+            Index(fields=['title', 'description'], name='product_search_idx'),
+            Index(fields=['battery_health'], name='product_battery_health_idx'),
             Index(fields=['title', 'price']),
-            Index(fields=['created_at', 'price']),
+            Index(fields=['category', 'condition']),
+            Index(fields=['created_at', 'is_active']),
         ]
         ordering = ['-created_at']
+
+    @cached_property
+    def cached_rating(self):
+        cache_key = f'product_rating_{self.id}'
+        rating = cache.get(cache_key)
+        if rating is None:
+            rating = self.calculate_rating()
+            cache.set(cache_key, rating, 60 * 60)  # Cache for 1 hour
+        return rating
+
+    def calculate_rating(self):
+        avg_rating = self.reviews.aggregate(models.Avg('rating'))['rating__avg']
+        return round(avg_rating, 1) if avg_rating else 0.0
+
+    def add_image(self, image_file):
+        """Add an additional image to the product"""
+        if not hasattr(self, '_images_to_save'):
+            self._images_to_save = []
+        self._images_to_save.append(image_file)
 
 
 class Category(models.Model):
     name = models.CharField(max_length=100, unique=True, db_index=True)
     slug = models.SlugField(unique=True, db_index=True)
+    description = models.TextField(blank=True)
+    created_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        verbose_name_plural = 'Categories'
         indexes = [
             Index(fields=['name', 'slug']),
         ]
         ordering = ['name']
 
     def save(self, *args, **kwargs):
-        super().save(*args, **kwargs)
+        if not self.slug:
+            self.slug = slugify(self.name)
         cache.delete_pattern('category:*')
+        super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
-        super().delete(*args, **kwargs)
         cache.delete_pattern('category:*')
+        super().delete(*args, **kwargs)
+
+    def __str__(self):
+        return self.name
+
+
+class Review(models.Model):
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='reviews')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reviews')
+    rating = models.IntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+    comment = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['product', 'created_at']),
+            models.Index(fields=['user', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f'Review by {self.user.username} for {self.product.title}'
+
+    def clean(self):
+        if self.rating < 1 or self.rating > 5:
+            raise ValidationError({'rating': 'Rating must be between 1 and 5'})
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
+        # Update product rating
+        self.product.calculate_rating()
+        # Clear cache
+        cache.delete_pattern('product_*')
+
+
+class MediaImage(models.Model):
+    image = models.ImageField(upload_to='media/')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Image {self.id}"

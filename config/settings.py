@@ -16,20 +16,27 @@ DEBUG = True
 ALLOWED_HOSTS = ['localhost', '127.0.0.1']
 
 # CORS settings
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_ALL_ORIGINS = False  # Безопаснее явно указывать разрешенные домены
 CORS_ALLOW_CREDENTIALS = True
+
+# Разрешенные домены для продакшена и разработки
 CORS_ALLOWED_ORIGINS = [
-    "https://localhost:3000",
-    "https://127.0.0.1:3000",
-    "https://localhost:8000",
-    "https://127.0.0.1:8000"
+    "https://cy16820.tw1.ru",
+    "https://www.cy16820.tw1.ru",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000"
 ]
+
+# Регулярные выражения для дополнительных доменов
 CORS_ALLOWED_ORIGIN_REGEXES = [
-    r"^https://localhost:3000$",
-    r"^https://127.0.0.1:3000$",
-    r"^https://localhost:8000$",
-    r"^https://127.0.0.1:8000$"
+    r"^https://\w+\.cy16820\.tw1\.ru$",
+    r"^http://localhost:\d+$",
+    r"^http://127\.0\.0\.1:\d+$"
 ]
+
+# Разрешенные методы
 CORS_ALLOW_METHODS = [
     'DELETE',
     'GET',
@@ -38,6 +45,8 @@ CORS_ALLOW_METHODS = [
     'POST',
     'PUT',
 ]
+
+# Разрешенные заголовки
 CORS_ALLOW_HEADERS = [
     'accept',
     'accept-encoding',
@@ -49,19 +58,45 @@ CORS_ALLOW_HEADERS = [
     'x-csrftoken',
     'x-requested-with',
 ]
-CORS_EXPOSE_HEADERS = ['content-type', 'content-length']
-CORS_PREFLIGHT_MAX_AGE = 86400  # 24 hours
-CORS_URLS_REGEX = r'^/api/.*$'  # Only allow CORS for API endpoints
 
-# Cookie settings
+# Заголовки, доступные для JavaScript
+CORS_EXPOSE_HEADERS = ['content-type', 'content-length']
+
+# Время кэширования preflight запросов
+CORS_PREFLIGHT_MAX_AGE = 86400  # 24 часа
+
+# Применять CORS только к API эндпоинтам
+CORS_URLS_REGEX = r'^/api/.*$'
+
+# Настройки для разработки
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
+    CORS_ALLOW_CREDENTIALS = True
+    SESSION_COOKIE_SECURE = False
+    CSRF_COOKIE_SECURE = False
+else:
+    # Настройки для продакшена
+    CORS_ALLOW_ALL_ORIGINS = False
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_SSL_REDIRECT = True
+    SECURE_HSTS_SECONDS = 31536000  # 1 год
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+
+# Настройки куки
 SESSION_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_SAMESITE = 'Lax'
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE = True
 SESSION_COOKIE_HTTPONLY = True
 CSRF_COOKIE_HTTPONLY = True
-SESSION_COOKIE_DOMAIN = None  # Allow cookies to be set on all domains in development
-CSRF_COOKIE_DOMAIN = None  # Allow CSRF cookies to be set on all domains in development
+
+# Домен для куки (только для продакшена)
+if not DEBUG:
+    SESSION_COOKIE_DOMAIN = '.cy16820.tw1.ru'
+    CSRF_COOKIE_DOMAIN = '.cy16820.tw1.ru'
+else:
+    SESSION_COOKIE_DOMAIN = None
+    CSRF_COOKIE_DOMAIN = None
 
 # Application definition
 INSTALLED_APPS = [
@@ -76,61 +111,11 @@ INSTALLED_APPS = [
     'corsheaders',
     'django_extensions',
     'products',
-    'monitoring.apps.MonitoringConfig',
 ]
 
 # Console encoding settings
 sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer)
 sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer)
-
-# Security settings for development
-if DEBUG:
-    SECURE_SSL_REDIRECT = False
-    SESSION_COOKIE_SECURE = False
-    CSRF_COOKIE_SECURE = False
-    SECURE_HSTS_SECONDS = None
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = False
-    SECURE_HSTS_PRELOAD = False
-    SECURE_PROXY_SSL_HEADER = None
-    CORS_ALLOW_ALL_ORIGINS = True
-    CORS_ALLOW_CREDENTIALS = True
-    CORS_ALLOWED_ORIGINS = [
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000"
-    ]
-    CORS_ALLOWED_ORIGIN_REGEXES = [
-        r"^http://localhost:3000$",
-        r"^http://127.0.0.1:3000$",
-        r"^http://localhost:8000$",
-        r"^http://127.0.0.1:8000$"
-    ]
-    CORS_ALLOW_METHODS = [
-        'DELETE',
-        'GET',
-        'OPTIONS',
-        'PATCH',
-        'POST',
-        'PUT',
-    ]
-    CORS_ALLOW_HEADERS = [
-        'accept',
-        'accept-encoding',
-        'authorization',
-        'content-type',
-        'dnt',
-        'origin',
-        'user-agent',
-        'x-csrftoken',
-        'x-requested-with',
-    ]
-    CORS_EXPOSE_HEADERS = ['content-type', 'content-length']
-    CORS_PREFLIGHT_MAX_AGE = 86400  # 24 hours
-    CORS_URLS_REGEX = r'^/api/.*$'  # Only allow CORS for API endpoints
-
-# Append slash settings
-APPEND_SLASH = False  # Disable automatic trailing slash appending
 
 # Middleware order is important
 MIDDLEWARE = [
@@ -180,9 +165,12 @@ DATABASES = {
 CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-        'LOCATION': os.getenv('REDIS_URL', 'redis://localhost:6379/1'),
+        'LOCATION': os.getenv('REDIS_URL', 'redis://redis:6379/1'),
         'OPTIONS': {
             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            'SOCKET_CONNECT_TIMEOUT': 5,
+            'SOCKET_TIMEOUT': 5,
+            'RETRY_ON_TIMEOUT': True,
         }
     }
 }
@@ -199,9 +187,15 @@ CACHE_MIDDLEWARE_SECONDS = CACHE_TTL
 CACHE_MIDDLEWARE_KEY_PREFIX = 'store'
 
 # Security settings (consolidated)
-SECURE_SSL_REDIRECT = True
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE = True
+if DEBUG:
+    SECURE_SSL_REDIRECT = False
+    SESSION_COOKIE_SECURE = False
+    CSRF_COOKIE_SECURE = False
+else:
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+
 SECURE_HSTS_SECONDS = None
 SECURE_HSTS_INCLUDE_SUBDOMAINS = False
 SECURE_HSTS_PRELOAD = False
@@ -214,6 +208,9 @@ X_FRAME_OPTIONS = 'DENY'
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+STATICFILES_DIRS = [
+    os.path.join(BASE_DIR, 'static'),
+]
 
 # Media files
 MEDIA_URL = '/media/'
@@ -229,15 +226,8 @@ REST_FRAMEWORK = {
     'PAGE_SIZE': 12,
 }
 
-# Monitoring
-MONITORING_CONFIG = {
-    'ENABLE_TELEMETRY': True,
-    'MAX_LOG_ENTRIES': 1000,
-    'SAMPLE_RATE': 0.1,
-}
-
 # Static files optimization
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
 WHITENOISE_MAX_AGE = 31536000  # 1 year
 
 # Gunicorn settings

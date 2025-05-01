@@ -1,33 +1,44 @@
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from rest_framework import status
-from rest_framework.test import APITestCase
+from rest_framework.test import APITestCase, APIClient
 from products.models import Product, Category
 from django.contrib.auth import get_user_model
 
 User = get_user_model()
 
+@override_settings(
+    CACHES={
+        'default': {
+            'BACKEND': 'django.core.cache.backends.dummy.DummyCache',
+        }
+    }
+)
 class ProductAPITest(APITestCase):
     def setUp(self):
+        self.client = APIClient()
         self.user = User.objects.create_user(
             username='testuser',
             password='testpass123'
         )
-        self.category = Category.objects.create(
-            name='Smartphones',
-            slug='smartphones'
-        )
+        self.client.force_authenticate(user=self.user)
+        self.category = Category.objects.create(name='Test Category', slug='test-category')
         self.product = Product.objects.create(
-            title='Test Product',
-            description='Test Description',
+            title='Test-Product-123',  # Using valid characters
+            description='Test description',
             price=1000,
-            phone_model='iPhone 13',
-            storage=128,
-            color='Black',
             condition='A',
             category=self.category,
+            phone_model='iPhone 13',
+            color='black',
+            storage='128GB',
+            screen_size=6.1,
+            screen_condition='Good',
+            body_condition='Good',
+            battery_health=90,
+            includes='Phone, charger',
             seller=self.user
         )
-        self.client.force_authenticate(user=self.user)
 
     def test_get_products_list(self):
         url = reverse('product-list')
@@ -39,19 +50,24 @@ class ProductAPITest(APITestCase):
         url = reverse('product-detail', args=[self.product.id])
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['title'], 'Test Product')
+        self.assertEqual(response.data['title'], 'Test-Product-123')
 
     def test_create_product(self):
         url = reverse('product-list')
         data = {
-            'title': 'New Product',
+            'title': 'New-Product-123',  # Using valid characters
             'description': 'New Description',
             'price': 2000,
             'phone_model': 'iPhone 14',
-            'storage': 256,
-            'color': 'White',
+            'storage': '256GB',
+            'color': 'white',
             'condition': 'B',
-            'category': self.category.id
+            'category': self.category.id,
+            'screen_size': 6.1,
+            'screen_condition': 'Good',
+            'body_condition': 'Good',
+            'battery_health': 90,
+            'includes': 'Phone, charger'
         }
         response = self.client.post(url, data, format='json')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
@@ -60,13 +76,25 @@ class ProductAPITest(APITestCase):
     def test_update_product(self):
         url = reverse('product-detail', args=[self.product.id])
         data = {
-            'title': 'Updated Product',
-            'price': 1500
+            'title': 'Changed-Product-123',
+            'description': 'Changed test description that is valid',
+            'price': 1500,
+            'condition': self.product.condition,
+            'category': self.category.id,
+            'phone_model': 'iPhone-14',
+            'color': 'black',
+            'storage': '256GB',
+            'screen_size': 6.1,
+            'screen_condition': 'Good',
+            'body_condition': 'Good',
+            'battery_health': 90,
+            'includes': 'Phone, charger'
         }
         response = self.client.patch(url, data, format='json')
+        print(response.content)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.product.refresh_from_db()
-        self.assertEqual(self.product.title, 'Updated Product')
+        self.assertEqual(self.product.title, 'Changed-Product-123')
         self.assertEqual(self.product.price, 1500)
 
     def test_delete_product(self):

@@ -1,4 +1,8 @@
 from store.settings import *
+import django
+
+# Initialize Django
+django.setup()
 
 # Override settings for tests
 DEBUG = True
@@ -12,14 +16,14 @@ DATABASES = {
     }
 }
 
-# Disable Redis for tests
+# Use DummyCache for tests
 CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.dummy.DummyCache',
     }
 }
 
-# Disable Redis session engine
+# Use database session engine for tests
 SESSION_ENGINE = 'django.contrib.sessions.backends.db'
 
 # Use faster password hasher for tests

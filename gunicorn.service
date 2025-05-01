@@ -14,4 +14,4 @@ ExecStart=/path/to/venv/bin/gunicorn \
     store.wsgi:application
 
 [Install]
-WantedBy=multi-user.target 
+WantedBy=multi-user.target  
