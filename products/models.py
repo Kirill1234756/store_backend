@@ -90,6 +90,18 @@ class Product(models.Model):
         ('1TB', '1TB')
     ]
 
+    PACKAGE_CONTENTS_CHOICES = [
+        ('phone', 'Телефон'),
+        ('charger', 'Зарядное устройство'),
+        ('cable', 'Кабель'),
+        ('documents', 'Документы'),
+        ('case', 'Чехол'),
+        ('screen_protector', 'Защитное стекло'),
+        ('box', 'Коробка'),
+        ('earphones', 'Наушники'),
+        ('sim_tool', 'Скрепка для SIM'),
+    ]
+
     # Основная информация
     title = models.CharField(
         max_length=200,
@@ -129,6 +141,26 @@ class Product(models.Model):
         db_index=True
     )
     is_active = models.BooleanField(default=True, db_index=True)
+    phone_number = models.CharField(
+        max_length=20,
+        verbose_name='Номер телефона',
+        validators=[
+            RegexValidator(
+                regex=r'^(\+7|8)?\s?\(?\d{3}\)?\s?\d{3}[-]?\d{2}[-]?\d{2}$',
+                message='Введите номер телефона в формате +7 (999) 999-99-99 или 8 (999) 999-99-99',
+                code='invalid_phone_number'
+            )
+        ],
+        help_text='Формат: +7 (999) 999-99-99 или 8 (999) 999-99-99'
+    )
+    is_top = models.BooleanField(default=False, db_index=True, verbose_name='В топе')
+    city = models.CharField(
+        max_length=100,
+        verbose_name='Город',
+        blank=True,
+        null=True,
+        db_index=True
+    )
 
     # Связи с другими моделями
     category = models.ForeignKey(
@@ -161,6 +193,12 @@ class Product(models.Model):
                 code='invalid_phone_model'
             )
         ]
+    )
+    display = models.CharField(
+        max_length=10,
+        verbose_name='Размер дисплея',
+        default='6.1"',
+        help_text='Размер дисплея в дюймах'
     )
     color = models.CharField(
         max_length=50,
@@ -201,19 +239,24 @@ class Product(models.Model):
         default=False,
         verbose_name='Наличие турбо'
     )
-    комплектация = models.JSONField(
+    package_contents = models.JSONField(
         verbose_name='Комплектация',
         default=list,
         help_text='Список комплектующих'
     )
+    imei = models.CharField(max_length=32, blank=True, null=True)
+    sim = models.PositiveSmallIntegerField(default=1)
+    face = models.BooleanField(default=False)
+    market = models.CharField(max_length=100, blank=True, null=True)
+    faults = models.JSONField(default=list, blank=True)
 
     # Даты
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     # Изображения
-    main_image = models.ImageField(upload_to='products/', null=True, blank=True)
-    additional_images = models.ManyToManyField('MediaImage', blank=True, related_name='products')
+    main_image = models.ImageField(upload_to='products/main/', blank=True, null=True)
+    product_images = models.ManyToManyField('MediaImage', blank=True, related_name='products')
 
     # Рейтинг
     rating = models.DecimalField(
@@ -231,48 +274,57 @@ class Product(models.Model):
     def __str__(self):
         return self.title
 
+    def format_phone_number(self, phone):
+        if not phone:
+            return phone
+            
+        # Remove all non-digit characters
+        digits = ''.join(filter(str.isdigit, phone))
+        
+        # If number starts with 8, replace with 7
+        if digits.startswith('8'):
+            digits = '7' + digits[1:]
+        
+        # If number doesn't start with 7, add it
+        if not digits.startswith('7'):
+            digits = '7' + digits
+        
+        # Format the number
+        if len(digits) == 11:  # +7 + 10 digits
+            return f"+7 ({digits[1:4]}) {digits[4:7]}-{digits[7:9]}-{digits[9:]}"
+        return phone
+
     def clean(self):
         if self.price is not None and self.price < 0:
             raise ValidationError({'price': 'Цена не может быть отрицательной'})
         if self.battery_health is not None and (self.battery_health < 0 or self.battery_health > 100):
             raise ValidationError({'battery_health': 'Здоровье аккумулятора должно быть от 0 до 100%'})
+        
+        # Format phone number before validation
+        if self.phone_number:
+            formatted_number = self.format_phone_number(self.phone_number)
+            if formatted_number != self.phone_number:
+                self.phone_number = formatted_number
 
     def save(self, *args, **kwargs):
-        # Handle main image
-        if self.main_image and hasattr(self.main_image, 'file'):
-            # Delete old image if exists
-            if self.pk:
-                old_instance = Product.objects.get(pk=self.pk)
-                if old_instance.main_image and old_instance.main_image != self.main_image:
-                    delete_image(old_instance.main_image.path)
+        # Format phone number before saving
+        if self.phone_number:
+            self.phone_number = self.format_phone_number(self.phone_number)
+        
+        # Ensure package_contents is a list
+        if not isinstance(self.package_contents, list):
+            self.package_contents = []
             
-            # Save new image
-            self.main_image.name = save_image(self.main_image)
-        
-        # Handle additional images
-        if hasattr(self, '_images_to_save'):
-            # Delete old images
-            if self.pk:
-                old_instance = Product.objects.get(pk=self.pk)
-                for old_image in old_instance.additional_images.all():
-                    delete_image(old_image.image.path)
+        # Generate slug if not exists
+        if not self.slug:
+            base_slug = slugify(f"{self.title}-{self.phone_model}-{self.storage}")
+            self.slug = base_slug
+            # If slug exists, append timestamp
+            if Product.objects.filter(slug=self.slug).exists():
+                from django.utils import timezone
+                timestamp = timezone.now().strftime('%Y%m%d%H%M%S')
+                self.slug = f"{base_slug}-{timestamp}"
             
-            # Save new images
-            self.additional_images.clear()
-            for image in self._images_to_save:
-                if hasattr(image, 'file'):
-                    saved_path = save_image(image)
-                    self.additional_images.add(MediaImage.objects.create(image=saved_path))
-            delattr(self, '_images_to_save')
-        
-        if not self.slug or (self._original_title and self.title != self._original_title):
-            self.slug = slugify(self.title)
-            original_slug = self.slug
-            counter = 1
-            while Product.objects.filter(slug=self.slug).exclude(id=self.id).exists():
-                self.slug = f"{original_slug}-{counter}"
-                counter += 1
-        
         super().save(*args, **kwargs)
         self._original_title = self.title
         cache.delete_pattern('product_*')
@@ -283,7 +335,7 @@ class Product(models.Model):
             delete_image(self.main_image.path)
         
         # Delete additional images
-        for image in self.additional_images.all():
+        for image in self.product_images.all():
             delete_image(image.image.path)
         
         super().delete(*args, **kwargs)
@@ -308,7 +360,7 @@ class Product(models.Model):
             Index(fields=['category', 'condition']),
             Index(fields=['created_at', 'is_active']),
         ]
-        ordering = ['-created_at']
+        ordering = ['-is_top', '-created_at']
 
     @cached_property
     def cached_rating(self):
@@ -387,12 +439,3 @@ class Review(models.Model):
         self.product.calculate_rating()
         # Clear cache
         cache.delete_pattern('product_*')
-
-
-class MediaImage(models.Model):
-    image = models.ImageField(upload_to='media/')
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return f"Image {self.id}"

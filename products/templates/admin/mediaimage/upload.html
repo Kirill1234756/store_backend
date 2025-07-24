@@ -1,0 +1,127 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls static admin_modify %}
+
+{% block extrahead %}{{ block.super }}
+<script type="text/javascript" src="{% url 'admin:jsi18n' %}"></script>
+{{ media }}
+{% endblock %}
+
+{% block extrastyle %}{{ block.super }}
+<link rel="stylesheet" type="text/css" href="{% static "admin/css/forms.css" %}">
+<style>
+    .preview-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 10px;
+    }
+    .preview-item {
+        position: relative;
+        width: 150px;
+        height: 150px;
+        border: 1px solid #ddd;
+        padding: 5px;
+    }
+    .preview-item img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+    }
+    .preview-item .remove {
+        position: absolute;
+        top: 5px;
+        right: 5px;
+        background: rgba(255,0,0,0.7);
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+        line-height: 1;
+    }
+    .file-input {
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        width: 100%;
+        max-width: 400px;
+    }
+    .help {
+        color: #666;
+        font-size: 13px;
+        margin-top: 5px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <fieldset class="module aligned">
+            <h2>Загрузка изображений</h2>
+            
+            {% for field in form %}
+                <div class="form-row">
+                    <div class="field-box">
+                        {{ field.errors }}
+                        {{ field.label_tag }}
+                        {{ field }}
+                        {% if field.help_text %}
+                            <div class="help">{{ field.help_text|safe }}</div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% if field.name == 'images' %}
+                    <div class="preview-container" id="imagePreview"></div>
+                {% endif %}
+            {% endfor %}
+        </fieldset>
+        
+        <div class="submit-row">
+            <input type="submit" value="Загрузить" class="default" name="_save">
+        </div>
+    </form>
+</div>
+
+<script>
+document.querySelector('.file-input').addEventListener('change', function(e) {
+    const preview = document.getElementById('imagePreview');
+    preview.innerHTML = '';
+    
+    Array.from(this.files).forEach((file, index) => {
+        if (!file.type.startsWith('image/')) {
+            return;
+        }
+        
+        const reader = new FileReader();
+        const div = document.createElement('div');
+        div.className = 'preview-item';
+        
+        reader.onload = function(e) {
+            div.innerHTML = `
+                <img src="${e.target.result}" alt="Preview ${index + 1}">
+                <button type="button" class="remove" title="Удалить">&times;</button>
+            `;
+        }
+        
+        reader.readAsDataURL(file);
+        preview.appendChild(div);
+    });
+});
+
+document.addEventListener('click', function(e) {
+    if (e.target.matches('.remove')) {
+        const item = e.target.closest('.preview-item');
+        if (item) {
+            item.remove();
+        }
+    }
+});
+</script>
+{% endblock %} 

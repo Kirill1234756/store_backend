@@ -92,6 +92,10 @@ CORS_ALLOW_HEADERS = [
 CORS_EXPOSE_HEADERS = ['content-type', 'content-length']
 CORS_PREFLIGHT_MAX_AGE = 86400
 CORS_URLS_REGEX = r'^/api/.*$'
+CORS_ALLOW_ALL_ORIGINS = True  # Для локальной разработки, убрать в проде!
+CORS_ALLOWED_ORIGINS = [
+    'http://localhost:3002',
+]
 
 # Cookie settings
 SESSION_COOKIE_SAMESITE = 'Lax'

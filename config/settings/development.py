@@ -4,7 +4,7 @@ import os
 DEBUG = True
 SECRET_KEY = 'django-insecure-development-key'
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', '192.168.88.147']
 
 # CORS settings for development
 CORS_ALLOW_ALL_ORIGINS = True
@@ -19,10 +19,12 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:3002",
     "http://localhost:3003",
     "http://127.0.0.1:3003",
+    "http://192.168.88.147:3002",
 ]
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^http://localhost:\d+$",
-    r"^http://127\.0\.0\.1:\d+$"
+    r"^http://127\.0\.0\.1:\d+$",
+    r"^http://192\.168\.88\.147:\d+$"
 ]
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_METHODS = [
@@ -101,7 +103,7 @@ CACHE_MIDDLEWARE_SECONDS = 60 * 15  # 15 minutes
 CACHE_MIDDLEWARE_KEY_PREFIX = 'store_dev'
 
 # Session settings
-SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
+SESSION_ENGINE = 'django.contrib.sessions.backends.db'
 SESSION_CACHE_ALIAS = 'default'
 
 # Email settings for development

@@ -1,0 +1,9 @@
+{% include 'django/forms/widgets/file.html' %}
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    var input = document.querySelector('input[name="{{ widget.name }}"]')
+    if (input) {
+      input.setAttribute('multiple', 'multiple')
+    }
+  })
+</script>

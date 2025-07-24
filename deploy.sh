@@ -1,19 +1,36 @@
 #!/bin/bash
 
-# Активируем виртуальное окружение
-source /path/to/venv/bin/activate
+# Остановка при ошибках
+set -e
 
-# Устанавливаем зависимости
+echo "Starting deployment..."
+
+# Активация виртуального окружения
+source venv/bin/activate
+
+# Получение последних изменений
+echo "Pulling latest changes..."
+git pull origin main
+
+# Установка зависимостей
+echo "Installing dependencies..."
 pip install -r requirements.txt
 
-# Применяем миграции
+# Применение миграций
+echo "Applying migrations..."
 python manage.py migrate
 
-# Собираем статику
+# Сбор статических файлов
+echo "Collecting static files..."
 python manage.py collectstatic --noinput
 
-# Перезапускаем Gunicorn
-sudo systemctl restart gunicorn
+# Перезапуск сервисов
+echo "Restarting services..."
+sudo systemctl restart store
+sudo systemctl restart nginx
 
-# Перезапускаем Nginx
-sudo systemctl restart nginx 
+# Очистка кэша
+echo "Clearing cache..."
+python manage.py clearcache
+
+echo "Deployment completed successfully!" 

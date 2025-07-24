@@ -1,12 +1,12 @@
 from django.db import models
 from django.utils.text import slugify
 from .image_utils import save_image, delete_image
+from .models import Product
 import os
 
 class MediaImage(models.Model):
-    """Model for storing media images"""
     title = models.CharField(max_length=255, blank=True)
-    image = models.ImageField(upload_to='media/images/')
+    image_file = models.ImageField(upload_to='products/additional/', blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -16,22 +16,29 @@ class MediaImage(models.Model):
         verbose_name_plural = 'Media Images'
     
     def __str__(self):
-        return self.title or os.path.basename(self.image.name)
+        return self.title or f'Image {self.id}'
+    
+    @property
+    def image(self):
+        if self.image_file:
+            return self.image_file.url
+        return None
+
+    @property
+    def image_url(self):
+        if self.image_file:
+            return self.image_file.url
+        return None
     
     def save(self, *args, **kwargs):
-        if self.image and hasattr(self.image, 'file'):
-            # Delete old image if exists
-            if self.pk:
-                old_instance = MediaImage.objects.get(pk=self.pk)
-                if old_instance.image and old_instance.image != self.image:
-                    delete_image(old_instance.image.path)
-            
-            # Save new image
-            self.image.name = save_image(self.image, path_prefix='media/images/')
-        
+        if not self.title:
+            self.title = f"Additional image"
         super().save(*args, **kwargs)
     
     def delete(self, *args, **kwargs):
-        if self.image:
-            delete_image(self.image.path)
+        if self.image_file:
+            try:
+                delete_image(self.image_file.path)
+            except:
+                pass
         super().delete(*args, **kwargs) 

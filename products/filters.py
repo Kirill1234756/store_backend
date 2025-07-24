@@ -12,6 +12,7 @@ class ProductFilter(django_filters.FilterSet):
     body_condition = django_filters.CharFilter(field_name='body_condition')
     screen_condition = django_filters.CharFilter(field_name='screen_condition')
     turbo = django_filters.BooleanFilter(field_name='turbo')
+    city = django_filters.CharFilter(field_name='city', lookup_expr='icontains')
     
     priceRange = django_filters.CharFilter(method='filter_price_range')
     batteryHealth = django_filters.CharFilter(method='filter_battery_health')
@@ -22,7 +23,7 @@ class ProductFilter(django_filters.FilterSet):
         fields = [
             'min_price', 'max_price', 'category', 'phone_model', 'storage', 
             'condition', 'color', 'body_condition', 'screen_condition', 'turbo',
-            'priceRange', 'batteryHealth', 'комплектация'
+            'priceRange', 'batteryHealth', 'комплектация', 'city'
         ]
 
     def filter_price_range(self, queryset, name, value):
@@ -43,7 +44,7 @@ class ProductFilter(django_filters.FilterSet):
         try:
             items = value.split(',')
             for item in items:
-                queryset = queryset.filter(комплектация__contains=[item])
+                queryset = queryset.filter(package_contents__contains=[item])
             return queryset
         except (ValueError, AttributeError):
             return queryset 

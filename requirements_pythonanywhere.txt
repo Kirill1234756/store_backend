@@ -1,0 +1,31 @@
+# Core (только необходимый минимум)
+Django==4.2.7
+djangorestframework==3.14.0
+django-cors-headers==4.3.0
+django-filter==23.3
+
+# Database
+mysqlclient==2.2.0
+
+# Static
+whitenoise==6.5.0
+
+# Utils
+python-dotenv==1.0.0
+Pillow==10.1.0
+
+# Production
+gunicorn==21.2.0
+
+# Cache (локальный для PythonAnywhere)
+django-redis==5.4.0
+
+# Static & Media
+django-storages==1.14.2
+django-cleanup==8.0.0
+
+# Development & Testing (можно удалить в продакшене)
+# django-debug-toolbar==4.2.0
+# pytest==7.4.3
+# pytest-django==4.7.0
+# coverage==7.3.2 
