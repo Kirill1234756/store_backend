@@ -266,6 +266,19 @@ class Product(models.Model):
         validators=[MinValueValidator(0), MaxValueValidator(5)],
         db_index=True
     )
+    
+    # Статус обработки изображений
+    image_processing_status = models.CharField(
+        max_length=20,
+        choices=[
+            ('pending', 'Ожидает'),
+            ('processing', 'Обрабатывается'),
+            ('completed', 'Завершено'),
+            ('failed', 'Ошибка')
+        ],
+        default='pending',
+        verbose_name='Статус обработки изображений'
+    )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

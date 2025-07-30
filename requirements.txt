@@ -1,33 +1,23 @@
-# Django и DRF
-Django==5.0.2
-djangorestframework>=3.14.0
-django-cors-headers>=4.3.1
-django-filter>=23.5
-django-extensions>=3.2.3
-
-# База данных
-psycopg2-binary==2.9.9
-django-redis>=5.4.0
-
-# Сервер
+# Core Django dependencies
+Django==4.2.7
+djangorestframework==3.14.0
+django-cors-headers==4.3.1
+Pillow==10.1.0
+python-decouple==3.8
 gunicorn==21.2.0
 whitenoise==6.6.0
+django-filter==23.5
 
-# Утилиты
-python-dotenv==1.0.1
-Pillow==10.2.0
-requests==2.31.0
+# Elasticsearch dependencies
+django-elasticsearch-dsl==8.0.0
+elasticsearch-dsl==8.11.0
+elasticsearch==8.11.0
 
-# Безопасность
-django-storages>=1.14.2
-django-csp>=3.7
-django-honeypot>=1.0.4
+# Additional dependencies
+django-extensions==3.2.3
+psycopg2-binary==2.9.7
+redis==5.0.1
+django-redis==5.4.0
 
-# Мониторинг
-sentry-sdk==1.39.1
-django-prometheus==2.3.1
-
-# Оптимизация
-django-debug-toolbar==4.3.0  # Только для отладки
-django-cacheops==7.2
-django-compressor==4.4
+# Development dependencies
+django-debug-toolbar==4.2.0

@@ -97,6 +97,37 @@ CACHES = {
     }
 }
 
+# CELERY CONFIGURATION
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://127.0.0.1:6379/0')
+CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'django-db')
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'UTC'
+CELERY_ENABLE_UTC = True
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
+CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60  # 25 minutes
+CELERY_WORKER_PREFETCH_MULTIPLIER = 4
+CELERY_WORKER_MAX_TASKS_PER_CHILD = 1000
+CELERY_WORKER_MAX_MEMORY_PER_CHILD = 200000  # 200MB
+CELERY_TASK_ACKS_LATE = True
+CELERY_WORKER_DISABLE_RATE_LIMITS = False
+CELERY_WORKER_SEND_TASK_EVENTS = True
+CELERY_TASK_SEND_SENT_EVENT = True
+CELERY_EVENT_QUEUE_EXPIRES = 60
+CELERY_WORKER_CANCEL_LONG_RUNNING_TASKS_ON_CONNECTION_LOSS = True
+
+# ASYNC CONFIGURATION
+ASGI_APPLICATION = 'config.asgi.application'
+DJANGO_ALLOW_ASYNC_UNSAFE = os.getenv('DJANGO_ALLOW_ASYNC_UNSAFE', 'False').lower() == 'true'
+
+# Database async settings
+DATABASES['default']['OPTIONS'] = {
+    'connect_timeout': 10,
+    'application_name': 'django_app_dev',
+}
+
 # Cache middleware settings
 CACHE_MIDDLEWARE_ALIAS = 'default'
 CACHE_MIDDLEWARE_SECONDS = 60 * 15  # 15 minutes
@@ -111,4 +142,23 @@ EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 
 # Media files
 MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media') 
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+# Elasticsearch settings for development
+ELASTICSEARCH_ENABLED = True
+
+# Elasticsearch connection settings
+ELASTICSEARCH_DSL = {
+    'default': {
+        'hosts': ['http://localhost:9200']
+    }
+}
+
+# Elasticsearch index settings
+ELASTICSEARCH_INDEX_NAMES = {
+    'products.ProductDocument': 'products',
+}
+
+# Elasticsearch settings for development
+ELASTICSEARCH_DSL_AUTOSYNC = True
+ELASTICSEARCH_DSL_AUTO_REFRESH = True 

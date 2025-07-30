@@ -9,6 +9,7 @@ from django.core.cache import cache
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
 from django.views.decorators.vary import vary_on_cookie
+from .cache_service import CacheService, cache_products, cache_search, cache_facets, cache_suggestions, cache_stats
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
 import json
@@ -30,6 +31,13 @@ from django.conf import settings
 import os
 import requests
 from django.http import FileResponse, Http404
+
+# Elasticsearch imports
+try:
+    from .search_service import ProductSearchService
+    ELASTICSEARCH_AVAILABLE = True
+except ImportError:
+    ELASTICSEARCH_AVAILABLE = False
 
 GOOGLE_VISION_API_KEY = os.environ.get('GOOGLE_VISION_API_KEY')
 GOOGLE_VISION_ENDPOINT = 'https://vision.googleapis.com/v1/images:annotate'
@@ -71,6 +79,14 @@ class ProductViewSet(viewsets.ModelViewSet):
         'condition', '-condition', 'body_condition', '-body_condition', 'screen_condition', '-screen_condition'
     ]
     ordering = ['-created_at']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Инициализируем Elasticsearch сервис если доступен
+        if ELASTICSEARCH_AVAILABLE and getattr(settings, 'ELASTICSEARCH_ENABLED', False):
+            self.search_service = ProductSearchService()
+        else:
+            self.search_service = None
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -194,25 +210,167 @@ class ProductViewSet(viewsets.ModelViewSet):
         return queryset
 
     def list(self, request, *args, **kwargs):
+        # Проверяем кэш для GET-запросов
+        if request.method == 'GET':
+            # Собираем параметры для ключа кэша
+            filters = self._collect_filters(request)
+            page = int(request.GET.get('page', 1))
+            page_size = int(request.GET.get('page_size', 20))
+            
+            # Пытаемся получить из кэша
+            cached_result = CacheService.get_cached_products(filters, page, page_size)
+            if cached_result:
+                return Response(cached_result)
+        
+        # Проверяем, используем ли мы Elasticsearch
+        use_elasticsearch = (
+            self.search_service is not None and
+            getattr(settings, 'ELASTICSEARCH_ENABLED', False)
+        )
+        
+        if use_elasticsearch:
+            return self._elasticsearch_list(request, *args, **kwargs)
+        else:
+            return self._postgresql_list(request, *args, **kwargs)
+    
+    def _elasticsearch_list(self, request, *args, **kwargs):
+        """Поиск через Elasticsearch"""
+        try:
+            # Получаем параметры запроса
+            search_query = request.query_params.get('search', '')
+            page = int(request.query_params.get('page', 1))
+            page_size = int(request.query_params.get('limit', 20))
+            ordering = request.query_params.get('ordering', '')
+            
+            # Собираем фильтры
+            filters = self._collect_filters(request)
+            
+            # Определяем город пользователя если не указан
+            if not filters.get('city') and not search_query:
+                user_city = detect_user_city(request)
+                if user_city:
+                    filters['city'] = user_city
+            
+            # Выполняем поиск через Elasticsearch
+            products, total_count = self.search_service.search_products(
+                query=search_query,
+                filters=filters,
+                sort=ordering,
+                page=page,
+                page_size=page_size
+            )
+            
+            # Сериализуем результаты
+            serializer = self.get_serializer(products, many=True)
+            
+            # Формируем ответ
+            response_data = {
+                'count': total_count,
+                'next': self._get_next_url(page, page_size, total_count, request),
+                'previous': self._get_previous_url(page, request),
+                'results': serializer.data,
+                'page': page,
+                'limit': page_size,
+                'totalPages': (total_count + page_size - 1) // page_size,
+                'search_engine': 'elasticsearch'
+            }
+            
+            # Сохраняем в кэш
+            CacheService.set_cached_products(response_data, filters, page, page_size)
+            
+            return Response(response_data)
+            
+        except Exception as e:
+            # Fallback к PostgreSQL при ошибке Elasticsearch
+            print(f"Elasticsearch error: {e}")
+            return self._postgresql_list(request, *args, **kwargs)
+    
+    def _postgresql_list(self, request, *args, **kwargs):
+        """Поиск через PostgreSQL (fallback)"""
         queryset = self.filter_queryset(self.get_queryset())
         page = self.paginate_queryset(queryset)
         
         if page is not None:
             serializer = self.get_serializer(page, many=True)
             response = self.get_paginated_response(serializer.data)
-            print("\n=== API Response Data ===")
-            print("Response type:", type(response.data))
-            print("Response data:", response.data)
-            print("Results type:", type(response.data.get('results')))
-            print("Results:", response.data.get('results'))
-            print("Count:", response.data.get('count'))
-            print("Page size:", response.data.get('page_size'))
-            print("Next:", response.data.get('next'))
-            print("Previous:", response.data.get('previous'))
+            response.data['search_engine'] = 'postgresql'
+            
+            # Сохраняем в кэш для GET-запросов
+            if request.method == 'GET':
+                filters = self._collect_filters(request)
+                page_num = int(request.GET.get('page', 1))
+                page_size = int(request.GET.get('page_size', 20))
+                CacheService.set_cached_products(response.data, filters, page_num, page_size)
+            
             return response
         
         serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
+        response_data = serializer.data
+        response_data.append({'search_engine': 'postgresql'})
+        
+        # Сохраняем в кэш для GET-запросов
+        if request.method == 'GET':
+            filters = self._collect_filters(request)
+            page_num = int(request.GET.get('page', 1))
+            page_size = int(request.GET.get('page_size', 20))
+            CacheService.set_cached_products(response_data, filters, page_num, page_size)
+        
+        return Response(response_data)
+    
+    def _collect_filters(self, request):
+        """Сбор фильтров из параметров запроса"""
+        filters = {}
+        
+        # Базовые фильтры
+        filter_params = {
+            'priceRange': 'priceRange',
+            'batteryHealth': 'batteryHealth',
+            'condition': 'condition',
+            'color': 'color',
+            'storage': 'storage',
+            'body_condition': 'body_condition',
+            'screen_condition': 'screen_condition',
+            'turbo': 'turbo',
+            'city': 'city',
+            'category': 'category',
+            'phone_model': 'phone_model',
+        }
+        
+        for param, key in filter_params.items():
+            value = request.query_params.get(param)
+            if value is not None and value != '':
+                if param == 'turbo':
+                    filters[key] = value.lower() == 'true'
+                else:
+                    filters[key] = value
+        
+        # Фильтр по комплектации
+        комплектация = request.query_params.get('комплектация')
+        if комплектация:
+            if isinstance(комплектация, str):
+                filters['комплектация'] = [item.strip() for item in комплектация.split(',')]
+            else:
+                filters['комплектация'] = комплектация
+        
+        return filters
+    
+    def _get_next_url(self, page, page_size, total_count, request):
+        """Генерация URL для следующей страницы"""
+        if page * page_size >= total_count:
+            return None
+        
+        params = request.query_params.copy()
+        params['page'] = page + 1
+        return f"?{params.urlencode()}"
+    
+    def _get_previous_url(self, page, request):
+        """Генерация URL для предыдущей страницы"""
+        if page <= 1:
+            return None
+        
+        params = request.query_params.copy()
+        params['page'] = page - 1
+        return f"?{params.urlencode()}"
 
     def perform_create(self, serializer):
         try:
@@ -364,6 +522,108 @@ class ProductViewSet(viewsets.ModelViewSet):
         product.is_top = False
         product.save(update_fields=['is_top'])
         return Response({'status': 'removed from top', 'id': product.id, 'is_top': product.is_top})
+    
+    @action(detail=False, methods=['get'])
+    def suggest(self, request):
+        """Получение подсказок для автодополнения"""
+        query = request.query_params.get('q', '')
+        limit = int(request.query_params.get('limit', 5))
+        
+        if not query or len(query.strip()) < 2:
+            return Response({'suggestions': []})
+        
+        # Пытаемся получить из кэша
+        cached_suggestions = CacheService.get_cached_suggestions(query, limit)
+        if cached_suggestions is not None:
+            return Response({'suggestions': cached_suggestions})
+        
+        if not self.search_service:
+            return Response({'suggestions': []})
+        
+        try:
+            suggestions = self.search_service.suggest_products(query, limit)
+            
+            # Сохраняем в кэш
+            CacheService.set_cached_suggestions(suggestions, query, limit)
+            
+            return Response({'suggestions': suggestions})
+        except Exception as e:
+            print(f"Error in suggestions: {e}")
+            return Response({'suggestions': []})
+    
+    @action(detail=False, methods=['get'])
+    def facets(self, request):
+        """Получение агрегаций для фасетного поиска"""
+        # Пытаемся получить из кэша
+        filters = self._collect_filters(request)
+        cached_facets = CacheService.get_cached_facets(filters)
+        if cached_facets is not None:
+            return Response(cached_facets)
+        
+        if not self.search_service:
+            return Response({})
+        
+        try:
+            facets = self.search_service.get_facets(filters)
+            
+            # Сохраняем в кэш
+            CacheService.set_cached_facets(facets, filters)
+            
+            return Response(facets)
+        except Exception as e:
+            print(f"Error in facets: {e}")
+            return Response({})
+    
+    @action(detail=False, methods=['get'])
+    def search_analytics(self, request):
+        """Аналитика поиска"""
+        if not self.search_service:
+            return Response({'error': 'Elasticsearch not available'})
+        
+        query = request.query_params.get('q', '')
+        
+        if not query:
+            return Response({'error': 'Query parameter required'})
+        
+        try:
+            # Получаем результаты поиска
+            products, total_count = self.search_service.search_products(
+                query=query,
+                page=1,
+                page_size=100  # Больше результатов для анализа
+            )
+            
+            # Анализируем результаты
+            analytics = {
+                'query': query,
+                'total_results': total_count,
+                'price_range': {
+                    'min': min([p.price for p in products]) if products else 0,
+                    'max': max([p.price for p in products]) if products else 0,
+                    'avg': sum([p.price for p in products]) / len(products) if products else 0
+                },
+                'conditions': {},
+                'cities': {},
+                'models': {}
+            }
+            
+            # Подсчитываем статистику
+            for product in products:
+                # Состояния
+                analytics['conditions'][product.condition] = analytics['conditions'].get(product.condition, 0) + 1
+                
+                # Города
+                if product.city:
+                    analytics['cities'][product.city] = analytics['cities'].get(product.city, 0) + 1
+                
+                # Модели
+                if product.phone_model:
+                    analytics['models'][product.phone_model] = analytics['models'].get(product.phone_model, 0) + 1
+            
+            return Response(analytics)
+        except Exception as e:
+            print(f"Error in search analytics: {e}")
+            return Response({'error': 'Failed to analyze search'})
 
 
 class ProductStatsView(viewsets.ViewSet):
